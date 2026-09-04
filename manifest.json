@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "marijn.zotero",
+  "name": "Zotero Search",
+  "version": "0.1.0",
+  "author": "Marijn",
+  "license": "MIT",
+  "description": "Search the local Zotero library and copy Better BibTeX citation keys from the bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Zotero Search",
+    "description": "Search Zotero and copy a citation key for Typst.",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {},
+    "schema": []
+  }
+}
