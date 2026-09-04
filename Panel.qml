@@ -29,6 +29,10 @@ Panel {
 
   readonly property string endpoint: "http://127.0.0.1:23119/better-bibtex/export?library.json"
   readonly property int resultLimit: 50
+  readonly property string copyFormat: {
+    var configured = String(root.setting("copyFormat", "citekey")).toLowerCase()
+    return configured === "citation" ? "citation" : "citekey"
+  }
 
   onOpenedChanged: if (opened) focusTimer.restart()
   onSelectedIndexChanged: scrollToSelection()
@@ -143,13 +147,21 @@ Panel {
   }
 
   function copyItem(item) {
-    if (!item || !item.citationKey) {
-      root.statusMessage = "Enable Better BibTeX to copy citation keys"
+    if (!item) return
+
+    var output = root.copyFormat === "citation"
+      ? Model.formatCitation(item)
+      : (item.citationKey ? "@" + item.citationKey : "")
+    if (!output) {
+      root.statusMessage = root.copyFormat === "citation"
+        ? "No citation data available"
+        : "Enable Better BibTeX to copy citekeys"
+      statusTimer.restart()
       return
     }
-    var typstCitation = "@" + item.citationKey
-    Quickshell.execDetached(["wl-copy", "--", typstCitation])
-    root.statusMessage = "Copied " + typstCitation
+
+    Quickshell.execDetached(["wl-copy", "--", output])
+    root.statusMessage = root.copyFormat === "citation" ? "Copied citation" : "Copied " + output
     statusTimer.restart()
   }
 
@@ -359,6 +371,9 @@ Panel {
             delegate: Rectangle {
               required property var modelData
               required property int index
+              readonly property bool canCopy: root.copyFormat === "citation"
+                ? Model.formatCitation(modelData) !== ""
+                : modelData.citationKey !== ""
               width: resultList.width
               height: Style.space(64)
               radius: Style.cornerRadius
@@ -413,7 +428,7 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
                 radius: Style.cornerRadius
                 color: copyMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
-                opacity: modelData.citationKey !== "" ? 1 : 0.35
+                opacity: canCopy ? 1 : 0.35
 
                 Text {
                   anchors.centerIn: parent
@@ -427,13 +442,15 @@ Panel {
                   id: copyMouse
                   anchors.fill: parent
                   hoverEnabled: true
-                  enabled: modelData.citationKey !== ""
+                  enabled: canCopy
                   cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                   onClicked: root.copyItem(modelData)
 
                   PanelToolTip {
                     visible: copyMouse.containsMouse
-                    text: modelData.citationKey !== "" ? "Copy citation key" : "Better BibTeX required"
+                    text: canCopy
+                      ? (root.copyFormat === "citation" ? "Copy citation" : "Copy citekey")
+                      : (root.copyFormat === "citation" ? "No citation data" : "Better BibTeX required")
                     fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                   }
                 }

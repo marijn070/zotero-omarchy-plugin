@@ -30,6 +30,29 @@ function authorsFor(item) {
   return names.join("; ")
 }
 
+function formatCitation(item) {
+  var source = item || {}
+  var authors = clean(source.authors) || authorsFor(source)
+  var year = clean(source.year) || firstYear(source.issued) || clean(source.date).slice(0, 4)
+  var title = clean(source.title)
+  var container = clean(source.container || source["container-title"] || source.publicationTitle)
+  var parts = []
+
+  if (title === "Untitled item") title = ""
+  if (authors) {
+    parts.push(authors + (year ? " (" + year + ")" : ""))
+  } else if (title) {
+    parts.push(title + (year ? " (" + year + ")" : ""))
+    title = ""
+  } else if (year) {
+    parts.push(year)
+  }
+  if (title) parts.push(title)
+  if (container) parts.push(container)
+
+  return parts.length > 0 ? parts.join(". ") + "." : ""
+}
+
 function normalized(item, data) {
   var source = data || item || {}
   var title = clean(source.title)
@@ -44,6 +67,13 @@ function normalized(item, data) {
     citationKey: citationKey,
     authors: authors,
     year: year,
+    container: container,
+    citation: formatCitation({
+      title: title || "Untitled item",
+      authors: authors,
+      year: year,
+      container: container
+    }),
     details: details,
     searchText: lower([title, citationKey, authors, year, container].join(" "))
   }
