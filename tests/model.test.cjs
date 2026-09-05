@@ -10,17 +10,34 @@ const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest
 const context = {}
 vm.runInNewContext(source, context)
 
-test("publishes citekey as the backward-compatible default copy format", () => {
+test("publishes Typst as the safe default copy format", () => {
   const metadata = manifest.barWidget
-  assert.equal(metadata.defaults.copyFormat, "citekey")
-  assert.deepEqual(metadata.schema[0].options, ["citekey", "citation"])
-  assert.equal(metadata.schema[0].defaultValue, "citekey")
+  assert.equal(metadata.defaults.copyFormat, "typst")
+  assert.deepEqual(metadata.schema[0].options, ["typst", "latex"])
+  assert.equal(metadata.schema[0].defaultValue, "typst")
+})
+
+test("copies exact Typst and LaTeX citekey output", () => {
+  const item = { citationKey: "smithRobots2024" }
+  assert.equal(context.copyOutput(item, "typst"), "@smithRobots2024")
+  assert.equal(context.copyOutput(item, "latex"), "\\cite{smithRobots2024}")
+  assert.equal(context.copyOutput(item, "citekey"), "@smithRobots2024")
+  assert.equal(context.copyOutput(item, "citation"), "@smithRobots2024")
+  assert.equal(context.copyOutput({ citationKey: "" }, "latex"), "")
 })
 
 test("starts Zotero only through the fixed local command", () => {
   assert.match(panelSource, /Quickshell\.execDetached\(\["\/usr\/bin\/zotero"\]\)/)
   assert.match(panelSource, /text: root\.zoteroStarting \? "Starting Zotero\.\.\." : "Start Zotero"/)
   assert.match(panelSource, /zoteroProbeEndpoint/)
+})
+
+test("persists copy format with the documented atomic config schema", () => {
+  assert.ok(panelSource.includes('copyConfigPath: Quickshell.env("HOME") + "/.config/omarchy/zotero-search.json"'))
+  assert.match(panelSource, /atomicWrites: true/)
+  assert.match(panelSource, /schemaVersion: 1/)
+  assert.match(panelSource, /copyConfigFile\.setText\(JSON\.stringify/)
+  assert.match(panelSource, /onSaveFailed/)
 })
 
 test("uses Better BibTeX first but gates startup on the Zotero API probe", () => {

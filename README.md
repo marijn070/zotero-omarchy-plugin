@@ -1,6 +1,6 @@
 # Zotero Search for Omarchy
 
-A standalone Omarchy top-bar widget for searching a local Zotero library and copying either a Better BibTeX citekey or a readable citation.
+A standalone Omarchy top-bar widget for searching a local Zotero library and copying a Better BibTeX citekey in Typst or LaTeX format.
 
 ## Requirements
 
@@ -27,12 +27,20 @@ To place it in the bar, add an entry to the relevant layout in `~/.config/omarch
 
 ```json
 {
-  "id": "marijn.zotero",
-  "copyFormat": "citekey"
+  "id": "marijn.zotero"
 }
 ```
 
-Settings are inline properties on the widget entry, not a separate settings file. `copyFormat` accepts `citekey` (the default) or `citation`. After editing the layout, rescan the shell:
+The in-panel Copy format dropdown persists to `~/.config/omarchy/zotero-search.json` using this schema:
+
+```json
+{
+  "schemaVersion": 1,
+  "copyFormat": "typst"
+}
+```
+
+The file is written asynchronously with atomic replacement. Missing, malformed, or unsupported files safely use Typst. The old inline `copyFormat` shell entry remains a migration fallback: `citekey` and the retired `citation` value both map to Typst, while `typst` and `latex` map directly. A valid dedicated file takes precedence. After editing the bar layout, rescan the shell:
 
 ```bash
 omarchy-shell shell rescanPlugins
@@ -42,17 +50,19 @@ Left click opens the search panel. Click a result or press Enter to copy the sel
 
 ## Copy formats
 
-- `citekey`: copies `@citekey`, preserving the original Typst-oriented behavior.
-- `citation`: copies a deterministic citation assembled from local fields as `Author; Author (Year). Title. Container.` Missing fields are omitted; items without an author use `Title (Year). Container.`
+Use the in-panel dropdown to choose:
 
-Citation output works with Zotero fallback results. Citekey output requires a citation key from Better BibTeX.
+- `typst`: copies `@citekey`.
+- `latex`: copies the literal `\cite{citekey}`.
+
+Both formats require a citation key from Better BibTeX. The previous human-readable `citation` mode is retired; its legacy setting maps to the safe Typst default rather than silently producing a different format.
 
 ## Shortcuts
 
 - `Ctrl + Super + Z`: toggle the search panel.
 - `Ctrl + N`: select the next result, wrapping at the end.
 - `Ctrl + P`: select the previous result, wrapping at the beginning.
-- `Enter`: copy the selected output using `copyFormat`.
+- `Enter`: copy the selected output using the chosen format.
 - `Escape`: close the panel.
 
 ## Official Omarchy distribution checklist

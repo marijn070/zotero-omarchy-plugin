@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "Marijn",
   "license": "MIT",
-  "description": "Search the local Zotero library and copy Better BibTeX citekeys or deterministic citations from the bar.",
+  "description": "Search the local Zotero library and copy Better BibTeX citekeys in Typst or LaTeX format from the bar.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,21 +14,21 @@
   },
   "barWidget": {
     "displayName": "Zotero Search",
-    "description": "Search Zotero and copy a citekey or readable citation.",
+    "description": "Search Zotero and copy a citekey in Typst or LaTeX format.",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "copyFormat": "citekey"
+      "copyFormat": "typst"
     },
     "schema": [
       {
         "key": "copyFormat",
         "type": "enum",
-        "label": "Copy output",
-        "options": ["citekey", "citation"],
-        "defaultValue": "citekey",
-        "description": "Choose the clipboard output. citekey copies @citekey for Typst; citation copies Author (Year). Title. Container."
+        "label": "Copy format",
+        "options": ["typst", "latex"],
+        "defaultValue": "typst",
+        "description": "Legacy shell.json fallback when the dedicated config is absent. The panel saves Typst (@citekey) or LaTeX (\\cite{citekey}) to ~/.config/omarchy/zotero-search.json."
       }
     ]
   }

@@ -29,17 +29,20 @@ Panel {
   property bool zoteroUnavailable: false
   property bool zoteroStarting: false
   property int startupAttempts: 0
+  property string copyFormat: "typst"
+  property bool copyConfigLoaded: false
+  property bool copyConfigFileValid: false
+  property bool copyConfigDirty: false
 
   readonly property string endpoint: "http://127.0.0.1:23119/better-bibtex/export?library.json"
   readonly property string zoteroProbeEndpoint: "http://127.0.0.1:23119/api/users/0/items?limit=1&format=json"
+  readonly property string copyConfigPath: Quickshell.env("HOME") + "/.config/omarchy/zotero-search.json"
   readonly property int resultLimit: 50
   readonly property int startupRetryLimit: 20
-  readonly property string copyFormat: {
-    var configured = String(root.setting("copyFormat", "citekey")).toLowerCase()
-    return configured === "citation" ? "citation" : "citekey"
-  }
 
   onOpenedChanged: if (opened) focusTimer.restart()
+  onSettingsChanged: if (root.copyConfigLoaded && !root.copyConfigFileValid && !root.copyConfigDirty)
+    root.applyLegacyCopyFormat()
   onSelectedIndexChanged: scrollToSelection()
   onResultsChanged: scrollToSelection()
 
@@ -76,6 +79,49 @@ Panel {
   function setCenterHoverRevealSuppressed(value) {
     if (root.bar && "centerHoverRevealSuppressed" in root.bar)
       root.bar.centerHoverRevealSuppressed = value
+  }
+
+  function applyLegacyCopyFormat() {
+    var configured = Model.normalizeCopyFormat(root.setting("copyFormat", "typst"))
+    root.copyFormat = configured || "typst"
+  }
+
+  function loadCopyConfig(raw) {
+    var configured = ""
+    try {
+      var parsed = JSON.parse(String(raw || ""))
+      if (parsed && parsed.schemaVersion === 1)
+        configured = Model.normalizeCopyFormat(parsed.copyFormat)
+    } catch (error) {
+      configured = ""
+    }
+
+    if (!root.copyConfigDirty) {
+      root.copyFormat = configured || "typst"
+      root.copyConfigFileValid = configured !== ""
+      if (!root.copyConfigFileValid) root.applyLegacyCopyFormat()
+    }
+    root.copyConfigLoaded = true
+    if (root.copyConfigDirty) copyConfigSaveTimer.restart()
+  }
+
+  function setCopyFormat(value) {
+    var configured = Model.normalizeCopyFormat(value)
+    if (!configured) return
+    if (root.copyFormat === configured && root.copyConfigLoaded && root.copyConfigFileValid) return
+    root.copyFormat = configured
+    root.copyConfigFileValid = false
+    root.copyConfigDirty = true
+    copyConfigSaveTimer.restart()
+  }
+
+  function saveCopyConfig() {
+    if (!root.copyConfigLoaded || !root.copyConfigDirty) return
+    copyConfigFile.setText(JSON.stringify({
+      schemaVersion: 1,
+      copyFormat: root.copyFormat
+    }, null, 2) + "\\n")
+    root.copyConfigDirty = false
   }
 
   function refresh() {
@@ -208,19 +254,16 @@ Panel {
   function copyItem(item) {
     if (!item) return
 
-    var output = root.copyFormat === "citation"
-      ? Model.formatCitation(item)
-      : (item.citationKey ? "@" + item.citationKey : "")
+    var output = Model.copyOutput(item, root.copyFormat)
     if (!output) {
-      root.statusMessage = root.copyFormat === "citation"
-        ? "No citation data available"
-        : "Better BibTeX required for citekeys"
+      root.statusMessage = (root.copyFormat === "latex" ? "LaTeX" : "Typst")
+        + " citekeys require Better BibTeX"
       statusTimer.restart()
       return
     }
 
     Quickshell.execDetached(["wl-copy", "--", output])
-    root.statusMessage = root.copyFormat === "citation" ? "Copied citation" : "Copied " + output
+    root.statusMessage = "Copied " + output
     statusTimer.restart()
   }
 
@@ -262,6 +305,28 @@ Panel {
     id: searchDebounce
     interval: 180
     onTriggered: root.applySearch()
+  }
+
+  FileView {
+    id: copyConfigFile
+    path: root.copyConfigPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadCopyConfig(text())
+    onLoadFailed: root.loadCopyConfig("")
+    onFileChanged: reload()
+    onSaved: root.copyConfigFileValid = true
+    onSaveFailed: {
+      root.copyConfigDirty = true
+      root.copyConfigFileValid = false
+    }
+  }
+
+  Timer {
+    id: copyConfigSaveTimer
+    interval: 150
+    onTriggered: root.saveCopyConfig()
   }
 
   Timer {
@@ -340,7 +405,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: searchField.activeFocus
+      blocked: searchField.activeFocus || copyFormatDropdown.popupOpen
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.bar.switchPanelFrom(root.barIdentity, direction) }
       onTextKey: function(text) {
@@ -432,6 +497,20 @@ Panel {
             }
           }
 
+          Dropdown {
+            id: copyFormatDropdown
+            width: parent.width
+            label: "Copy format"
+            value: root.copyFormat
+            options: [
+              { value: "typst", label: "Typst - @citekey" },
+              { value: "latex", label: "LaTeX - \\cite{citekey}" }
+            ]
+            foreground: root.foreground
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            onChanged: root.setCopyFormat(value)
+          }
+
           Text {
             visible: root.libraryLoaded || root.fallbackMode || root.errorMessage !== ""
               || root.zoteroUnavailable || root.zoteroStarting
@@ -475,9 +554,7 @@ Panel {
             delegate: Rectangle {
               required property var modelData
               required property int index
-              readonly property bool canCopy: root.copyFormat === "citation"
-                ? Model.formatCitation(modelData) !== ""
-                : modelData.citationKey !== ""
+              readonly property bool canCopy: modelData.citationKey !== ""
               width: resultList.width
               height: Style.space(64)
               radius: Style.cornerRadius
@@ -515,7 +592,7 @@ Panel {
                   width: parent.width
                   text: modelData.citationKey !== ""
                     ? modelData.citationKey + (modelData.details !== "" ? "  ·  " + modelData.details : "")
-                    : (modelData.details || "No citation key available")
+                    : (modelData.details || "No citekey available")
                   color: root.dimForeground
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.bodySmall
@@ -553,8 +630,8 @@ Panel {
                   PanelToolTip {
                     visible: copyMouse.containsMouse
                     text: canCopy
-                      ? (root.copyFormat === "citation" ? "Copy citation" : "Copy citekey")
-                      : (root.copyFormat === "citation" ? "No citation data" : "Better BibTeX required")
+                      ? (root.copyFormat === "latex" ? "Copy LaTeX citekey" : "Copy Typst citekey")
+                      : "Better BibTeX required for citekeys"
                     fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                   }
                 }

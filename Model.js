@@ -6,6 +6,21 @@ function lower(value) {
   return clean(value).toLowerCase()
 }
 
+function normalizeCopyFormat(value) {
+  var format = lower(value)
+  if (format === "latex") return "latex"
+  if (format === "typst" || format === "citekey" || format === "citation") return "typst"
+  return ""
+}
+
+function copyOutput(item, format) {
+  var citationKey = clean(item && item.citationKey)
+  if (!citationKey) return ""
+  return normalizeCopyFormat(format) === "latex"
+    ? "\\cite{" + citationKey + "}"
+    : "@" + citationKey
+}
+
 function firstYear(value) {
   var parts = value && value["date-parts"]
   if (!Array.isArray(parts) || !Array.isArray(parts[0]) || parts[0].length === 0) return ""
