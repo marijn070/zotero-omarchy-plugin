@@ -101,7 +101,7 @@ Panel {
       root.fallbackMode = false
       root.loading = false
       root.errorMessage = ""
-      root.statusMessage = normalized.length + " items from Better BibTeX"
+      root.statusMessage = normalized.length + " items loaded"
       root.applySearch()
     } catch (error) {
       root.probeZotero()
@@ -127,7 +127,7 @@ Panel {
         root.refresh()
         return
       }
-      root.startFallback("Better BibTeX is unavailable; searching Zotero without citekeys")
+      root.startFallback()
     } catch (error) {
       root.showZoteroUnavailable()
     }
@@ -135,10 +135,13 @@ Panel {
 
   function showZoteroUnavailable() {
     root.loading = false
+    root.fallbackMode = false
+    root.libraryLoaded = false
+    root.results = []
     root.zoteroUnavailable = true
     root.statusMessage = root.zoteroStarting
       ? "Waiting for Zotero to start..."
-      : "Zotero is not running"
+      : "Zotero local API is unavailable"
   }
 
   function startZotero() {
@@ -154,12 +157,13 @@ Panel {
     root.probeZotero()
   }
 
-  function startFallback(message) {
+  function startFallback() {
     root.fallbackMode = true
     root.libraryLoaded = false
     root.loading = false
-    root.errorMessage = message
-    root.statusMessage = ""
+    root.zoteroUnavailable = false
+    root.errorMessage = ""
+    root.statusMessage = "Searching Zotero library"
     root.applySearch()
   }
 
@@ -210,7 +214,7 @@ Panel {
     if (!output) {
       root.statusMessage = root.copyFormat === "citation"
         ? "No citation data available"
-        : "Enable Better BibTeX to copy citekeys"
+        : "Better BibTeX required for citekeys"
       statusTimer.restart()
       return
     }
@@ -556,16 +560,6 @@ Panel {
                 }
               }
             }
-          }
-
-          Text {
-            visible: root.fallbackMode && root.results.length > 0
-            width: parent.width
-            text: "Better BibTeX is unavailable, so these results cannot provide citekeys."
-            color: root.dimForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
           }
 
           Text {

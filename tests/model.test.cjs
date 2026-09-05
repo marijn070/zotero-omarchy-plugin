@@ -23,6 +23,17 @@ test("starts Zotero only through the fixed local command", () => {
   assert.match(panelSource, /zoteroProbeEndpoint/)
 })
 
+test("uses Better BibTeX first but gates startup on the Zotero API probe", () => {
+  const exportIndex = panelSource.indexOf('command: ["curl", "-fsS", "--max-time", "10", root.endpoint]')
+  const probeIndex = panelSource.indexOf('command: ["curl", "-fsS", "--max-time", "3", root.zoteroProbeEndpoint]')
+  assert.ok(exportIndex >= 0 && probeIndex > exportIndex)
+  assert.match(panelSource, /root\.startFallback\(\)/)
+  assert.match(panelSource, /root\.statusMessage = "Searching Zotero library"/)
+  assert.match(panelSource, /visible: root\.zoteroUnavailable \|\| root\.zoteroStarting/)
+  assert.doesNotMatch(panelSource, /Better BibTeX is unavailable; searching Zotero/)
+  assert.doesNotMatch(panelSource, /items from Better BibTeX/)
+})
+
 test("normalizes Better BibTeX JSON and searches citation keys", () => {
   const items = context.normalizeBibliography([
     {

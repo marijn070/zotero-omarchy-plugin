@@ -13,9 +13,9 @@ The plugin only contacts Zotero on loopback (`127.0.0.1:23119`):
 - Better BibTeX library export: `/better-bibtex/export?library.json`
 - Zotero fallback search: `/api/users/0/items?...`
 
-It does not use Zotero accounts, API keys, credentials, or external services. The fallback can search local titles and metadata without Better BibTeX; citekey output still requires Better BibTeX.
+It does not use Zotero accounts, API keys, credentials, or external services. On each refresh the plugin first requests the Better BibTeX export, then probes and searches Zotero's ordinary local API if that export is unavailable. If Zotero is running without Better BibTeX, the panel says `Searching Zotero library` and does not show a startup warning. Citekey output still requires Better BibTeX.
 
-If Zotero is not running, the panel shows a Start Zotero button. It launches the fixed local `/usr/bin/zotero` application command and keeps the panel responsive while retrying the local API. No command or launch path is taken from user input.
+The Start Zotero button is shown only when the local Zotero API probe fails. It launches the fixed local `/usr/bin/zotero` application command and keeps the panel responsive while retrying the API. No command or launch path is taken from user input.
 
 ## Install manually
 
