@@ -5,6 +5,7 @@ const test = require("node:test")
 const vm = require("node:vm")
 
 const source = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8")
+const panelSource = fs.readFileSync(path.join(__dirname, "..", "Panel.qml"), "utf8")
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"))
 const context = {}
 vm.runInNewContext(source, context)
@@ -14,6 +15,12 @@ test("publishes citekey as the backward-compatible default copy format", () => {
   assert.equal(metadata.defaults.copyFormat, "citekey")
   assert.deepEqual(metadata.schema[0].options, ["citekey", "citation"])
   assert.equal(metadata.schema[0].defaultValue, "citekey")
+})
+
+test("starts Zotero only through the fixed local command", () => {
+  assert.match(panelSource, /Quickshell\.execDetached\(\["\/usr\/bin\/zotero"\]\)/)
+  assert.match(panelSource, /text: root\.zoteroStarting \? "Starting Zotero\.\.\." : "Start Zotero"/)
+  assert.match(panelSource, /zoteroProbeEndpoint/)
 })
 
 test("normalizes Better BibTeX JSON and searches citation keys", () => {

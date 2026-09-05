@@ -26,9 +26,14 @@ Panel {
   property int selectedIndex: 0
   property string errorMessage: ""
   property string statusMessage: ""
+  property bool zoteroUnavailable: false
+  property bool zoteroStarting: false
+  property int startupAttempts: 0
 
   readonly property string endpoint: "http://127.0.0.1:23119/better-bibtex/export?library.json"
+  readonly property string zoteroProbeEndpoint: "http://127.0.0.1:23119/api/users/0/items?limit=1&format=json"
   readonly property int resultLimit: 50
+  readonly property int startupRetryLimit: 20
   readonly property string copyFormat: {
     var configured = String(root.setting("copyFormat", "citekey")).toLowerCase()
     return configured === "citation" ? "citation" : "citekey"
@@ -50,7 +55,7 @@ Panel {
 
   function open() {
     root.controller.show()
-    if (!root.libraryLoaded && !libraryProcess.running && !fallbackMode) root.refresh()
+    if (!root.libraryLoaded && !libraryProcess.running && !fallbackMode && !root.zoteroStarting) root.refresh()
     focusTimer.restart()
   }
 
@@ -74,12 +79,13 @@ Panel {
   }
 
   function refresh() {
-    if (libraryProcess.running) return
+    if (libraryProcess.running || root.zoteroStarting) return
     fallbackMode = false
     libraryLoaded = false
     library = []
     results = []
     loading = true
+    zoteroUnavailable = false
     errorMessage = ""
     statusMessage = "Connecting to Zotero..."
     libraryProcess.running = true
@@ -98,8 +104,54 @@ Panel {
       root.statusMessage = normalized.length + " items from Better BibTeX"
       root.applySearch()
     } catch (error) {
-      root.startFallback("Better BibTeX is unavailable; searching Zotero without citekeys")
+      root.probeZotero()
     }
+  }
+
+  function probeZotero() {
+    if (zoteroProbeProcess.running) return
+    root.loading = true
+    root.statusMessage = root.zoteroStarting ? "Waiting for Zotero to start..." : "Checking Zotero..."
+    zoteroProbeProcess.running = true
+  }
+
+  function applyZoteroProbe(raw) {
+    try {
+      var parsed = JSON.parse(String(raw || ""))
+      if (!Array.isArray(parsed)) throw new Error("Unexpected Zotero response")
+      root.zoteroUnavailable = false
+      if (root.zoteroStarting) {
+        root.zoteroStarting = false
+        startupRetry.stop()
+        root.statusMessage = "Connecting to Zotero..."
+        root.refresh()
+        return
+      }
+      root.startFallback("Better BibTeX is unavailable; searching Zotero without citekeys")
+    } catch (error) {
+      root.showZoteroUnavailable()
+    }
+  }
+
+  function showZoteroUnavailable() {
+    root.loading = false
+    root.zoteroUnavailable = true
+    root.statusMessage = root.zoteroStarting
+      ? "Waiting for Zotero to start..."
+      : "Zotero is not running"
+  }
+
+  function startZotero() {
+    if (root.zoteroStarting) return
+    root.zoteroStarting = true
+    root.zoteroUnavailable = true
+    root.startupAttempts = 0
+    root.loading = true
+    root.errorMessage = ""
+    root.statusMessage = "Starting Zotero..."
+    Quickshell.execDetached(["/usr/bin/zotero"])
+    startupRetry.restart()
+    root.probeZotero()
   }
 
   function startFallback(message) {
@@ -113,6 +165,9 @@ Panel {
 
   function applySearch() {
     root.selectedIndex = 0
+    if (!root.libraryLoaded && !root.fallbackMode && !root.zoteroUnavailable
+        && !root.zoteroStarting && !libraryProcess.running && !zoteroProbeProcess.running)
+      root.refresh()
     if (root.fallbackMode) {
       if (root.query.trim() === "") {
         root.results = []
@@ -211,6 +266,27 @@ Panel {
     onTriggered: root.statusMessage = ""
   }
 
+  Timer {
+    id: startupRetry
+    interval: 1200
+    repeat: true
+    onTriggered: {
+      if (!root.zoteroStarting) {
+        stop()
+        return
+      }
+      if (root.startupAttempts >= root.startupRetryLimit) {
+        root.zoteroStarting = false
+        root.showZoteroUnavailable()
+        root.statusMessage = "Zotero did not become ready"
+        stop()
+        return
+      }
+      root.startupAttempts++
+      root.probeZotero()
+    }
+  }
+
   Process {
     id: libraryProcess
     command: ["curl", "-fsS", "--max-time", "10", root.endpoint]
@@ -219,7 +295,19 @@ Panel {
       onStreamFinished: root.applyBibliography(text)
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0 && !root.libraryLoaded) root.startFallback("Better BibTeX is unavailable; searching Zotero without citekeys")
+      if (exitCode !== 0 && !root.libraryLoaded) root.probeZotero()
+    }
+  }
+
+  Process {
+    id: zoteroProbeProcess
+    command: ["curl", "-fsS", "--max-time", "3", root.zoteroProbeEndpoint]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyZoteroProbe(text)
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.showZoteroUnavailable()
     }
   }
 
@@ -230,10 +318,7 @@ Panel {
       onStreamFinished: root.applyFallback(text)
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0) {
-        root.loading = false
-        root.errorMessage = "Zotero search failed"
-      }
+      if (exitCode !== 0) root.probeZotero()
     }
   }
 
@@ -345,16 +430,31 @@ Panel {
 
           Text {
             visible: root.libraryLoaded || root.fallbackMode || root.errorMessage !== ""
+              || root.zoteroUnavailable || root.zoteroStarting
             width: parent.width
             text: root.errorMessage !== ""
               ? root.errorMessage
-              : (root.query.trim() === ""
-                ? (root.fallbackMode ? "Type a query to search Zotero" : root.statusMessage)
-                : (root.results.length === 0 && !root.loading ? "No matching items" : root.statusMessage))
+              : (root.zoteroStarting || root.zoteroUnavailable
+                ? root.statusMessage
+                : (root.query.trim() === ""
+                  ? (root.fallbackMode ? "Type a query to search Zotero" : root.statusMessage)
+                  : (root.results.length === 0 && !root.loading ? "No matching items" : root.statusMessage)))
             color: root.errorMessage !== "" ? Color.urgent : root.dimForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
+          }
+
+          Button {
+            visible: root.zoteroUnavailable || root.zoteroStarting
+            enabled: root.zoteroUnavailable && !root.zoteroStarting
+            width: parent.width
+            text: root.zoteroStarting ? "Starting Zotero..." : "Start Zotero"
+            iconText: root.zoteroStarting ? "󰦖" : "󰐊"
+            iconSpinning: root.zoteroStarting
+            foreground: root.foreground
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            onClicked: root.startZotero()
           }
 
           ListView {

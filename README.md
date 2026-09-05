@@ -4,7 +4,7 @@ A standalone Omarchy top-bar widget for searching a local Zotero library and cop
 
 ## Requirements
 
-- Zotero running locally with its local API enabled.
+- Zotero installed with its local API enabled.
 - `wl-copy` available for clipboard writes.
 - Better BibTeX enabled in Zotero when copying citekeys.
 
@@ -14,6 +14,8 @@ The plugin only contacts Zotero on loopback (`127.0.0.1:23119`):
 - Zotero fallback search: `/api/users/0/items?...`
 
 It does not use Zotero accounts, API keys, credentials, or external services. The fallback can search local titles and metadata without Better BibTeX; citekey output still requires Better BibTeX.
+
+If Zotero is not running, the panel shows a Start Zotero button. It launches the fixed local `/usr/bin/zotero` application command and keeps the panel responsive while retrying the local API. No command or launch path is taken from user input.
 
 ## Install manually
 
@@ -53,10 +55,11 @@ Citation output works with Zotero fallback results. Citekey output requires a ci
 - `Enter`: copy the selected output using `copyFormat`.
 - `Escape`: close the panel.
 
-## Marketplace readiness
+## Official Omarchy distribution checklist
 
-No remote repository or publication has been performed. This checkout's origin is local-only, so public marketplace distribution still needs:
+No remote repository or publication has been performed. The installed Omarchy release provides git-based plugin installation and manifest validation, but no local command for registering a plugin in an official catalog. Before public marketplace distribution:
 
-- the public repository URL to replace `<public-plugin-repository-url>`;
-- a stable `1.0.0` release tag or commit; and
-- the maintainer profile or contact details required by the marketplace listing.
+1. Publish a public git repository and replace `<public-plugin-repository-url>` in the install example.
+2. Tag the reviewed commit as `1.0.0` and confirm `omarchy plugin validate .` passes from that tag.
+3. Submit the plugin id `marijn.zotero`, repository URL, version, license, README, and maintainer profile or contact to the current official Omarchy plugin catalog maintainers.
+4. After acceptance, verify installation from the public URL with `omarchy plugin add <url> --enable --yes`; do not rely on local checkout paths.
