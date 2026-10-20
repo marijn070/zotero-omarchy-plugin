@@ -19,7 +19,10 @@ Panel {
 
   property string query: ""
   property var library: []
+  property var rawResults: []
   property var results: []
+  property var pinned: []
+  property var recent: []
   property bool libraryLoaded: false
   property bool fallbackMode: false
   property bool loading: false
@@ -30,19 +33,22 @@ Panel {
   property bool zoteroStarting: false
   property int startupAttempts: 0
   property string copyFormat: "typst"
-  property bool copyConfigLoaded: false
-  property bool copyConfigFileValid: false
-  property bool copyConfigDirty: false
+  property bool stateLoaded: false
+  property bool stateFileValid: false
+  property bool stateDirty: false
 
   readonly property string endpoint: "http://127.0.0.1:23119/better-bibtex/export?library.json"
   readonly property string zoteroProbeEndpoint: "http://127.0.0.1:23119/api/users/0/items?limit=1&format=json"
-  readonly property string copyConfigPath: Quickshell.env("HOME") + "/.config/omarchy/zotero-search.json"
+  readonly property string statePath: Quickshell.env("HOME") + "/.config/omarchy/zotero-search.json"
+  readonly property bool homeView: root.query.trim() === ""
   readonly property int resultLimit: 50
   readonly property int startupRetryLimit: 20
 
   onOpenedChanged: if (opened) focusTimer.restart()
-  onSettingsChanged: if (root.copyConfigLoaded && !root.copyConfigFileValid && !root.copyConfigDirty)
+  onSettingsChanged: if (root.stateLoaded && !root.stateFileValid && !root.stateDirty)
     root.applyLegacyCopyFormat()
+  onPinnedChanged: root.updateView(true)
+  onRecentChanged: if (root.homeView) root.updateView(true)
   onSelectedIndexChanged: scrollToSelection()
   onResultsChanged: scrollToSelection()
 
@@ -86,42 +92,72 @@ Panel {
     root.copyFormat = configured || "typst"
   }
 
-  function loadCopyConfig(raw) {
-    var configured = ""
-    try {
-      var parsed = JSON.parse(String(raw || ""))
-      if (parsed && parsed.schemaVersion === 1)
-        configured = Model.normalizeCopyFormat(parsed.copyFormat)
-    } catch (error) {
-      configured = ""
-    }
+  function loadState(raw) {
+    var state = Model.parseState(raw)
 
-    if (!root.copyConfigDirty) {
-      root.copyFormat = configured || "typst"
-      root.copyConfigFileValid = configured !== ""
-      if (!root.copyConfigFileValid) root.applyLegacyCopyFormat()
+    if (!root.stateDirty) {
+      root.copyFormat = state.copyFormat || "typst"
+      root.stateFileValid = state.copyFormat !== ""
+      if (!root.stateFileValid) root.applyLegacyCopyFormat()
+      root.pinned = state.pinned
+      root.recent = state.recent
     }
-    root.copyConfigLoaded = true
-    if (root.copyConfigDirty) copyConfigSaveTimer.restart()
+    root.stateLoaded = true
+    if (root.stateDirty) stateSaveTimer.restart()
+  }
+
+  function markStateDirty() {
+    root.stateDirty = true
+    stateSaveTimer.restart()
   }
 
   function setCopyFormat(value) {
     var configured = Model.normalizeCopyFormat(value)
     if (!configured) return
-    if (root.copyFormat === configured && root.copyConfigLoaded && root.copyConfigFileValid) return
+    if (root.copyFormat === configured && root.stateLoaded && root.stateFileValid) return
     root.copyFormat = configured
-    root.copyConfigFileValid = false
-    root.copyConfigDirty = true
-    copyConfigSaveTimer.restart()
+    root.stateFileValid = false
+    root.markStateDirty()
   }
 
-  function saveCopyConfig() {
-    if (!root.copyConfigLoaded || !root.copyConfigDirty) return
-    copyConfigFile.setText(JSON.stringify({
-      schemaVersion: 1,
-      copyFormat: root.copyFormat
-    }, null, 2) + "\\n")
-    root.copyConfigDirty = false
+  function saveState() {
+    if (!root.stateLoaded || !root.stateDirty) return
+    stateFile.setText(Model.serializeState(root.copyFormat, root.pinned, root.recent))
+    root.stateDirty = false
+  }
+
+  function togglePin(item) {
+    if (!item || !Model.hasIdentity(item)) return
+    root.pinned = Model.togglePin(root.pinned, item)
+    root.markStateDirty()
+  }
+
+  function togglePinSelected() {
+    root.togglePin(root.results[root.selectedIndex])
+  }
+
+  function recordRecent(item) {
+    root.recent = Model.recordRecent(root.recent, item)
+    root.markStateDirty()
+  }
+
+  function indexOfEntry(item) {
+    for (var i = 0; i < root.results.length; i++)
+      if (Model.sameItem(root.results[i], item)) return i
+    return -1
+  }
+
+  // The list shows pinned then recent papers for an empty query, and the search
+  // results (flagged with their pin state) as soon as the user types.
+  function updateView(keepSelection) {
+    var selected = keepSelection ? root.results[root.selectedIndex] : null
+    root.results = root.homeView
+      ? Model.homeEntries(root.pinned, root.recent, root.library, root.libraryLoaded)
+      : Model.decorateResults(root.rawResults, root.pinned)
+    var index = selected ? root.indexOfEntry(selected) : -1
+    if (index !== -1) root.selectedIndex = index
+    else if (root.selectedIndex >= root.results.length)
+      root.selectedIndex = Math.max(0, root.results.length - 1)
   }
 
   function refresh() {
@@ -129,7 +165,8 @@ Panel {
     fallbackMode = false
     libraryLoaded = false
     library = []
-    results = []
+    rawResults = []
+    updateView(false)
     loading = true
     zoteroUnavailable = false
     errorMessage = ""
@@ -183,7 +220,8 @@ Panel {
     root.loading = false
     root.fallbackMode = false
     root.libraryLoaded = false
-    root.results = []
+    root.rawResults = []
+    root.updateView(false)
     root.zoteroUnavailable = true
     root.statusMessage = root.zoteroStarting
       ? "Waiting for Zotero to start..."
@@ -219,14 +257,17 @@ Panel {
         && !root.zoteroStarting && !libraryProcess.running && !zoteroProbeProcess.running)
       root.refresh()
     if (root.fallbackMode) {
-      if (root.query.trim() === "") {
-        root.results = []
+      if (root.homeView) {
+        root.rawResults = []
+        root.loading = false
+        root.updateView(false)
         return
       }
       root.requestFallback()
       return
     }
-    root.results = Model.searchItems(root.library, root.query, root.resultLimit)
+    root.rawResults = root.homeView ? [] : Model.searchItems(root.library, root.query, root.resultLimit)
+    root.updateView(false)
   }
 
   function requestFallback() {
@@ -242,17 +283,26 @@ Panel {
 
   function applyFallback(raw) {
     try {
-      root.results = Model.normalizeZotero(JSON.parse(String(raw || "")))
+      var items = Model.normalizeZotero(JSON.parse(String(raw || "")))
       root.loading = false
+      if (root.homeView) return
+      root.rawResults = items
     } catch (error) {
-      root.results = []
+      root.rawResults = []
       root.loading = false
       root.errorMessage = "Zotero did not return readable search results"
     }
+    root.updateView(false)
   }
 
   function copyItem(item) {
     if (!item) return
+
+    if (item.missing) {
+      root.statusMessage = "This paper is no longer in your Zotero library"
+      statusTimer.restart()
+      return
+    }
 
     var output = Model.copyOutput(item, root.copyFormat)
     if (!output) {
@@ -265,6 +315,7 @@ Panel {
     Quickshell.execDetached(["wl-copy", "--", output])
     root.statusMessage = "Copied " + output
     statusTimer.restart()
+    root.recordRecent(item)
   }
 
   function moveSelection(delta) {
@@ -299,6 +350,12 @@ Panel {
       enabled: root.opened
       onActivated: root.cycleSelection(-1)
     }
+    property var pin: Shortcut {
+      sequence: "Ctrl+B"
+      context: Qt.ApplicationShortcut
+      enabled: root.opened
+      onActivated: root.togglePinSelected()
+    }
   }
 
   Timer {
@@ -308,25 +365,25 @@ Panel {
   }
 
   FileView {
-    id: copyConfigFile
-    path: root.copyConfigPath
+    id: stateFile
+    path: root.statePath
     watchChanges: true
     atomicWrites: true
     printErrors: false
-    onLoaded: root.loadCopyConfig(text())
-    onLoadFailed: root.loadCopyConfig("")
+    onLoaded: root.loadState(text())
+    onLoadFailed: root.loadState("")
     onFileChanged: reload()
-    onSaved: root.copyConfigFileValid = true
+    onSaved: root.stateFileValid = true
     onSaveFailed: {
-      root.copyConfigDirty = true
-      root.copyConfigFileValid = false
+      root.stateDirty = true
+      root.stateFileValid = false
     }
   }
 
   Timer {
-    id: copyConfigSaveTimer
+    id: stateSaveTimer
     interval: 150
-    onTriggered: root.saveCopyConfig()
+    onTriggered: root.saveState()
   }
 
   Timer {
@@ -431,6 +488,7 @@ Panel {
             height: headerLabel.implicitHeight
 
             Text {
+              textFormat: Text.PlainText
               id: headerLabel
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
@@ -442,6 +500,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               id: refreshLabel
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
@@ -471,6 +530,7 @@ Panel {
 
           TextField {
             id: searchField
+            objectName: "searchField"
             width: parent.width
             placeholderText: "Search title, author, or citekey"
             foreground: root.foreground
@@ -512,6 +572,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.libraryLoaded || root.fallbackMode || root.errorMessage !== ""
               || root.zoteroUnavailable || root.zoteroStarting
             width: parent.width
@@ -542,97 +603,171 @@ Panel {
 
           ListView {
             id: resultList
+            objectName: "resultList"
             width: parent.width
             height: root.results.length === 0
-              ? Style.space(44)
-              : Math.min(Style.space(420), root.results.length * Style.space(68))
+              ? 0
+              : Math.min(Style.space(420), resultList.contentHeight)
             model: root.results
             clip: true
             interactive: false
             spacing: Style.space(4)
 
-            delegate: Rectangle {
+            delegate: Item {
+              id: entry
               required property var modelData
               required property int index
-              readonly property bool canCopy: modelData.citationKey !== ""
+              readonly property bool canCopy: modelData.citationKey !== "" && !modelData.missing
+              readonly property bool showSection: modelData.section !== "result"
+                && (index === 0 || root.results[index - 1].section !== modelData.section)
+              readonly property string pinLabel: modelData.pinned ? "Unpin paper" : "Pin paper"
               width: resultList.width
-              height: Style.space(64)
-              radius: Style.cornerRadius
-              color: rowMouse.containsMouse || root.selectedIndex === index
-                ? Style.hoverFillFor(root.foreground, Color.accent)
-                : "transparent"
+              height: row.height + (showSection ? sectionLabel.height + Style.space(4) : 0)
 
-              MouseArea {
-                id: rowMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.copyItem(modelData)
-              }
-
-              Column {
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(12)
-                anchors.right: copyButton.left
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(4)
-
-                Text {
-                  width: parent.width
-                  text: modelData.title
-                  color: root.foreground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.body
-                  font.bold: true
-                  elide: Text.ElideRight
-                }
-
-                Text {
-                  width: parent.width
-                  text: modelData.citationKey !== ""
-                    ? modelData.citationKey + (modelData.details !== "" ? "  ·  " + modelData.details : "")
-                    : (modelData.details || "No citekey available")
-                  color: root.dimForeground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideRight
-                }
+              Text {
+                id: sectionLabel
+                visible: entry.showSection
+                height: visible ? implicitHeight : 0
+                textFormat: Text.PlainText
+                text: entry.modelData.section === "pinned" ? "PINNED" : "RECENT"
+                color: root.dimForeground
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
               }
 
               Rectangle {
-                id: copyButton
-                width: Style.space(34)
-                height: Style.space(34)
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
+                id: row
+                y: entry.showSection ? sectionLabel.height + Style.space(4) : 0
+                width: parent.width
+                height: Style.space(64)
                 radius: Style.cornerRadius
-                color: copyMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
-                opacity: canCopy ? 1 : 0.35
-
-                Text {
-                  anchors.centerIn: parent
-                  text: "󰆏"
-                  color: root.foreground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.title
-                }
+                opacity: entry.modelData.missing ? 0.6 : 1
+                color: rowMouse.containsMouse || root.selectedIndex === entry.index
+                  ? Style.hoverFillFor(root.foreground, Color.accent)
+                  : "transparent"
 
                 MouseArea {
-                  id: copyMouse
+                  id: rowMouse
                   anchors.fill: parent
                   hoverEnabled: true
-                  enabled: canCopy
-                  cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                  onClicked: root.copyItem(modelData)
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.copyItem(entry.modelData)
+                }
 
-                  PanelToolTip {
-                    visible: copyMouse.containsMouse
-                    text: canCopy
-                      ? (root.copyFormat === "latex" ? "Copy LaTeX citekey" : "Copy Typst citekey")
-                      : "Better BibTeX required for citekeys"
-                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                Column {
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(12)
+                  anchors.right: pinButton.left
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(4)
+
+                  Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: entry.modelData.title
+                    color: root.foreground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.body
+                    font.bold: true
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: entry.modelData.missing
+                      ? "No longer in your Zotero library"
+                      : (entry.modelData.citationKey !== ""
+                        ? entry.modelData.citationKey
+                          + (entry.modelData.details !== "" ? "  \u00b7  " + entry.modelData.details : "")
+                        : (entry.modelData.details || "No citekey available"))
+                    color: root.dimForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideRight
+                  }
+                }
+
+                Rectangle {
+                  id: pinButton
+                  width: Style.space(34)
+                  height: Style.space(34)
+                  anchors.right: copyButton.left
+                  anchors.rightMargin: Style.space(4)
+                  anchors.verticalCenter: parent.verticalCenter
+                  radius: Style.cornerRadius
+                  color: pinMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+                  opacity: entry.modelData.pinned || pinMouse.containsMouse || root.selectedIndex === entry.index ? 1 : 0.55
+
+                  Accessible.role: Accessible.Button
+                  Accessible.name: entry.pinLabel
+
+                  Text {
+                    anchors.centerIn: parent
+                    textFormat: Text.PlainText
+                    text: entry.modelData.pinned ? "󰐃" : "󰤱"
+                    color: entry.modelData.pinned ? Color.accent : root.foreground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.title
+                  }
+
+                  MouseArea {
+                    id: pinMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.togglePin(entry.modelData)
+
+                    PanelToolTip {
+                      visible: pinMouse.containsMouse
+                      text: entry.pinLabel + " (Ctrl+B)"
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                    }
+                  }
+                }
+
+                Rectangle {
+                  id: copyButton
+                  width: Style.space(34)
+                  height: Style.space(34)
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  radius: Style.cornerRadius
+                  color: copyMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+                  opacity: entry.canCopy ? 1 : 0.35
+
+                  Accessible.role: Accessible.Button
+                  Accessible.name: root.copyFormat === "latex" ? "Copy LaTeX citekey" : "Copy Typst citekey"
+
+                  Text {
+                    anchors.centerIn: parent
+                    textFormat: Text.PlainText
+                    text: "󰆏"
+                    color: root.foreground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.title
+                  }
+
+                  MouseArea {
+                    id: copyMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    enabled: entry.canCopy
+                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: root.copyItem(entry.modelData)
+
+                    PanelToolTip {
+                      visible: copyMouse.containsMouse
+                      text: entry.canCopy
+                        ? (root.copyFormat === "latex" ? "Copy LaTeX citekey" : "Copy Typst citekey")
+                        : (entry.modelData.missing
+                          ? "No longer in your Zotero library"
+                          : "Better BibTeX required for citekeys")
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                    }
                   }
                 }
               }
@@ -640,6 +775,18 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
+            visible: root.homeView && root.results.length === 0 && root.errorMessage === ""
+            width: parent.width
+            text: "No pinned or recent papers yet. Type to search, then pin a paper with Ctrl+B."
+            color: root.dimForeground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            textFormat: Text.PlainText
             visible: root.results.length === 0 && root.query.trim() !== "" && !root.loading && root.errorMessage === ""
             width: parent.width
             text: "No items found"

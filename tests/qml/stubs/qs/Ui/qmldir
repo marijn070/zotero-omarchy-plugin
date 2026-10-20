@@ -1,0 +1,8 @@
+module qs.Ui
+Panel 1.0 Panel.qml
+KeyboardPanel 1.0 KeyboardPanel.qml
+PanelKeyCatcher 1.0 PanelKeyCatcher.qml
+TextField 1.0 TextField.qml
+Dropdown 1.0 Dropdown.qml
+Button 1.0 Button.qml
+PanelToolTip 1.0 PanelToolTip.qml
