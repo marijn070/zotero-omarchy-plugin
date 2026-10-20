@@ -92,3 +92,15 @@ test("formats citations deterministically when an author is missing", () => {
   )
   assert.equal(context.formatCitation({ title: "Just a title" }), "Just a title.")
 })
+
+test("closing the panel always hides it and never assigns read-only bar properties", () => {
+  const closeBody = panelSource.match(/function close\(\) \{([\s\S]*?)\n  \}/)[1]
+  assert.ok(closeBody.indexOf("root.controller.hide()") !== -1)
+  assert.ok(
+    closeBody.indexOf("root.controller.hide()") < closeBody.indexOf("setCenterHoverRevealSuppressed(false)"),
+    "hide must run before the optional bar call so a bar API failure cannot strand the panel"
+  )
+  // The plugin bar API exposes centerHoverRevealSuppressed read-only; assigning it throws in close().
+  assert.doesNotMatch(panelSource, /root\.bar\.centerHoverRevealSuppressed\s*=/)
+  assert.match(panelSource, /root\.bar\.setCenterHoverRevealSuppressed\(value\)/)
+})
