@@ -1,29 +1,26 @@
 # Zotero Search for Omarchy
 
-A standalone Omarchy top-bar widget for searching a local Zotero library and copying a Better BibTeX citekey in Typst or LaTeX format.
+A top-bar widget for [Omarchy](https://omarchy.org/) that searches your local Zotero library and copies a Better BibTeX citekey to the clipboard, as Typst (`@citekey`) or LaTeX (`\cite{citekey}`).
+
+- Click the bar icon to open the search panel, or bind a key to it (see Open with a key).
+- Pinned papers are listed first and recently copied papers below them. Start typing and both are replaced by search results; clear the search to bring them back.
+- Click a paper or press `Enter` to copy its citekey.
 
 ## Requirements
 
-- Zotero installed with its local API enabled.
-- `wl-copy` available for clipboard writes.
-- Better BibTeX enabled in Zotero when copying citekeys.
+- Omarchy with shell plugin support (developed on Omarchy 4.5, Quickshell based).
+- Zotero installed at `/usr/bin/zotero`, with its local API enabled (Zotero settings, Advanced: allow other applications on this computer to communicate with Zotero).
+- [Better BibTeX](https://retorque.re/zotero-better-bibtex/) in Zotero to get citekeys. Without it you can still find papers, but copying a citekey is not possible.
+- `wl-copy` (package `wl-clipboard`) for clipboard writes.
+- `curl`, which Omarchy already ships.
 
-The plugin only contacts Zotero on loopback (`127.0.0.1:23119`):
-
-- Better BibTeX library export: `/better-bibtex/export?library.json`
-- Zotero fallback search: `/api/users/0/items?...`
-
-It does not use Zotero accounts, API keys, credentials, or external services. On each refresh the plugin first requests the Better BibTeX export, then probes and searches Zotero's ordinary local API if that export is unavailable. If Zotero is running without Better BibTeX, the panel says `Searching Zotero library` and does not show a startup warning. Citekey output still requires Better BibTeX.
-
-The Start Zotero button is shown only when the local Zotero API probe fails. It launches the fixed local `/usr/bin/zotero` application command and keeps the panel responsive while retrying the API. No command or launch path is taken from user input.
-
-## Install manually
+## Install
 
 ```bash
-omarchy plugin add <public-plugin-repository-url> --enable --yes
+omarchy plugin add https://github.com/marijn070/zotero-omarchy-plugin --enable --yes
 ```
 
-To place it in the bar, add an entry to the relevant layout in `~/.config/omarchy/shell.json`:
+Pick the bar section when asked, or add the widget yourself in `~/.config/omarchy/shell.json`:
 
 ```json
 {
@@ -31,45 +28,91 @@ To place it in the bar, add an entry to the relevant layout in `~/.config/omarch
 }
 ```
 
-The in-panel Copy format dropdown persists to `~/.config/omarchy/zotero-search.json` using this schema:
+The shell hot-reloads `shell.json`. If the widget does not appear, run `omarchy-shell shell rescanPlugins`.
+
+To update later: `omarchy plugin update marijn.zotero --yes`.
+
+## Remove
+
+```bash
+omarchy plugin remove marijn.zotero --yes
+```
+
+Remove the `marijn.zotero` entry from `~/.config/omarchy/shell.json` if it is still there. Optionally delete the settings file `~/.config/omarchy/zotero-search.json` (see Local data below).
+
+## Usage
+
+- Left click the bar icon: open or close the panel. Right click: refresh the library snapshot.
+- Type to search titles, authors and citekeys. Results replace the pinned and recent lists until the search box is empty again.
+- Each row has a pin button that pins or unpins the paper. Pinned papers stay at the top, newest pin first.
+- Recent papers are the last 10 papers whose citekey you copied with this plugin, newest first. A pinned paper is not repeated under Recent.
+- A pinned paper that is no longer in your Zotero library stays listed as "No longer in your Zotero library" so you can unpin it; a missing recent paper is hidden.
+- Pinned and recent papers are listed even while Zotero is closed, and copying works from the saved citekey. A Start Zotero button appears when the local API cannot be reached.
+- Use the Copy format dropdown to choose Typst or LaTeX output.
+
+### Shortcuts in the panel
+
+| Key | Action |
+| --- | --- |
+| `Escape` | Close the panel (closes an open dropdown first) |
+| `Enter` | Copy the selected paper |
+| `Up` / `Down` | Move the selection |
+| `Ctrl + N` / `Ctrl + P` | Next / previous paper, wrapping around |
+| `Ctrl + B` | Pin or unpin the selected paper |
+
+## Open with a key
+
+The plugin does not install a global key binding. To open the panel from the keyboard, bind a key to the shell's toggle command in `~/.config/hypr/bindings.lua`, for example:
+
+```lua
+o.bind("SUPER + CTRL + Z", "Zotero search", "omarchy-shell shell toggle marijn.zotero")
+```
+
+## Copy formats
+
+- `typst`: copies `@citekey`.
+- `latex`: copies `\cite{citekey}`.
+
+Both need the Better BibTeX citation key. The retired `citation` setting maps to Typst.
+
+## Local data and privacy
+
+The plugin only talks to Zotero on loopback (`127.0.0.1:23119`): the Better BibTeX library export (`/better-bibtex/export?library.json`), with Zotero's ordinary local API (`/api/users/0/items`) as fallback. It uses no accounts, API keys or external services, and nothing leaves your machine.
+
+Your copy format, pins and recents are saved in `~/.config/omarchy/zotero-search.json`:
 
 ```json
 {
   "schemaVersion": 1,
-  "copyFormat": "typst"
+  "copyFormat": "typst",
+  "pinned": [
+    {
+      "zoteroKey": "ABCD2345",
+      "citationKey": "smithRobots2024",
+      "title": "Robots and RDF",
+      "authors": "Smith, Ada",
+      "year": "2024",
+      "container": "Journal of RDF"
+    }
+  ],
+  "recent": []
 }
 ```
 
-The file is written asynchronously with atomic replacement. Missing, malformed, or unsupported files safely use Typst. The old inline `copyFormat` shell entry remains a migration fallback: `citekey` and the retired `citation` value both map to Typst, while `typst` and `latex` map directly. A valid dedicated file takes precedence. After editing the bar layout, rescan the shell:
+Entries are matched to your library by Zotero item key or citation key. The file is written asynchronously with atomic replacement, holds at most 50 pins and 10 recents, and a missing or unreadable file safely falls back to Typst with no pins. The old inline `copyFormat` entry in `shell.json` is still read as a fallback when no settings file exists.
+
+The only command the plugin starts is the fixed `/usr/bin/zotero` (Start Zotero button), plus `wl-copy` for the clipboard and `curl` for the loopback requests. No command text comes from search input or library data. Zotero-provided text is always rendered as plain text.
+
+## Development
 
 ```bash
-omarchy-shell shell rescanPlugins
+omarchy plugin validate .
+node --test tests/model.test.cjs
+tests/qml/run.sh
 ```
 
-Left click opens the search panel. Click a result or press Enter to copy the selected output. Right click refreshes the local library snapshot.
+`tests/qml/run.sh` needs the Qt 6 `qmltestrunner` (package `qt6-declarative`). It runs the real `Panel.qml` offscreen against test doubles of the shell types in `tests/qml/stubs`, so it needs neither the Omarchy shell nor Zotero.
 
-## Copy formats
+## License
 
-Use the in-panel dropdown to choose:
-
-- `typst`: copies `@citekey`.
-- `latex`: copies the literal `\cite{citekey}`.
-
-Both formats require a citation key from Better BibTeX. The previous human-readable `citation` mode is retired; its legacy setting maps to the safe Typst default rather than silently producing a different format.
-
-## Shortcuts
-
-- `Ctrl + Super + Z`: toggle the search panel.
-- `Ctrl + N`: select the next result, wrapping at the end.
-- `Ctrl + P`: select the previous result, wrapping at the beginning.
-- `Enter`: copy the selected output using the chosen format.
-- `Escape`: close the panel.
-
-## Official Omarchy distribution checklist
-
-No remote repository or publication has been performed. The installed Omarchy release provides git-based plugin installation and manifest validation, but no local command for registering a plugin in an official catalog. Before public marketplace distribution:
-
-1. Publish a public git repository and replace `<public-plugin-repository-url>` in the install example.
-2. Tag the reviewed commit as `1.0.0` and confirm `omarchy plugin validate .` passes from that tag.
-3. Submit the plugin id `marijn.zotero`, repository URL, version, license, README, and maintainer profile or contact to the current official Omarchy plugin catalog maintainers.
-4. After acceptance, verify installation from the public URL with `omarchy plugin add <url> --enable --yes`; do not rely on local checkout paths.
+[MIT](LICENSE). Copyright (c) 2026 Marijn.
